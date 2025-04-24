@@ -44,7 +44,7 @@ Function Push-ExecOnboardTenantQueue {
             @{ Name = 'Cloud App Security Administrator'; Id = '892c5842-a9a6-463a-8041-72aa08ca3cf6' },
             @{ Name = 'Cloud Device Administrator'; Id = '7698a772-787b-4ac8-901f-60d6b08affd2' },
             @{ Name = 'Teams Administrator'; Id = '69091246-20e8-4a56-aa4d-066075b2a7a8' },
-            @{ Name = 'Sharepoint Administrator'; Id = 'f28a1f50-f6e7-4571-818b-6a12f2af6b6c' },
+            @{ Name = 'SharePoint Administrator'; Id = 'f28a1f50-f6e7-4571-818b-6a12f2af6b6c' },
             @{ Name = 'Authentication Policy Administrator'; Id = '0526716b-113d-4c15-b2c8-68e3c22b9f80' },
             @{ Name = 'Privileged Role Administrator'; Id = 'e8611ab8-c189-46e8-94e1-60213ab1f814' },
             @{ Name = 'Privileged Authentication Administrator'; Id = '7be44c8a-adaf-4e2a-84d6-ab2649e08a13' }
@@ -233,7 +233,8 @@ Function Push-ExecOnboardTenantQueue {
                 $Logs.Add([PSCustomObject]@{ Date = (Get-Date).ToUniversalTime(); Log = 'Checking for missing groups for SAM user' })
                 $SamUserId = (New-GraphGetRequest -uri "https://graph.microsoft.com/beta/me?`$select=id" -NoAuthCheck $true).id
                 $CurrentMemberships = New-GraphGetRequest -uri "https://graph.microsoft.com/beta/me/transitiveMemberOf?`$select=id,displayName" -NoAuthCheck $true
-                foreach ($Role in $Item.Roles) {
+                $ExpectedCippRoles = $Item.Roles | Where-Object { $_.roleDefinitionId -in $ExpectedRoles.roleDefinitionId }
+                foreach ($Role in $ExpectedCippRoles) {
                     if ($CurrentMemberships.id -notcontains $Role.GroupId) {
                         $PostBody = @{
                             '@odata.id' = 'https://graph.microsoft.com/v1.0/directoryObjects/{0}' -f $SamUserId
@@ -315,8 +316,8 @@ Function Push-ExecOnboardTenantQueue {
                     $LastCPVError = ''
                     do {
                         try {
-                            Add-CIPPApplicationPermission -RequiredResourceAccess 'CIPPDefaults' -ApplicationId $ENV:ApplicationID -tenantfilter $Relationship.customer.tenantId
-                            Add-CIPPDelegatedPermission -RequiredResourceAccess 'CIPPDefaults' -ApplicationId $ENV:ApplicationID -tenantfilter $Relationship.customer.tenantId
+                            Add-CIPPApplicationPermission -RequiredResourceAccess 'CIPPDefaults' -ApplicationId $env:ApplicationID -tenantfilter $Relationship.customer.tenantId
+                            Add-CIPPDelegatedPermission -RequiredResourceAccess 'CIPPDefaults' -ApplicationId $env:ApplicationID -tenantfilter $Relationship.customer.tenantId
                             $CPVSuccess = $true
                             $Refreshing = $false
                         } catch {

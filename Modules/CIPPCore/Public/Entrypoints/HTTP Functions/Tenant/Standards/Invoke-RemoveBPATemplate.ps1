@@ -3,18 +3,18 @@ using namespace System.Net
 Function Invoke-RemoveBPATemplate {
     <#
     .FUNCTIONALITY
-        Entrypoint
+        Entrypoint,AnyTenant
     .ROLE
-        Tenant.ConditionalAccess.ReadWrite
+        Tenant.Standards.ReadWrite
     #>
     [CmdletBinding()]
     param($Request, $TriggerMetadata)
 
     $APIName = $Request.Params.CIPPEndpoint
     $Headers = $Request.Headers
-    Write-LogMessage -Headers $Headers -API $APINAME -message 'Accessed this API' -Sev 'Debug'
+    Write-LogMessage -Headers $Headers -API $APIName -message 'Accessed this API' -Sev 'Debug'
 
-    $ID = $request.Query.TemplateName ?? $request.Body.TemplateName
+    $ID = $Request.Query.TemplateName ?? $Request.Body.TemplateName
     try {
         $Table = Get-CippTable -tablename 'templates'
 

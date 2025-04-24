@@ -1542,7 +1542,7 @@ function Invoke-NinjaOneTenantSync {
                     Icon = 'fas fa-laptop'
                 },
                 @{
-                    Name = 'Sharepoint Admin'
+                    Name = 'SharePoint Admin'
                     Link = "https://admin.microsoft.com/Partner/beginclientsession.aspx?CTID=$($Customer.customerId)&CSDEST=SharePoint"
                     Icon = 'fas fa-shapes'
                 },
@@ -2141,4 +2141,5 @@ function Invoke-NinjaOneTenantSync {
         $CurrentItem | Add-Member -NotePropertyName lastStatus -NotePropertyValue 'Failed' -Force
         Add-CIPPAzDataTableEntity @MappingTable -Entity $CurrentItem -Force
     }
+    return $true
 }

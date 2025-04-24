@@ -32,15 +32,14 @@ function Invoke-CIPPStandardPasswordExpireDisabled {
     #>
 
     param($Tenant, $Settings)
-    ##$Rerun -Type Standard -Tenant $Tenant -Settings $Settings 'PasswordExpireDisabled'
 
     $GraphRequest = New-GraphGetRequest -uri 'https://graph.microsoft.com/v1.0/domains' -tenantid $Tenant
-    $DomainswithoutPassExpire = $GraphRequest | Where-Object -Property passwordValidityPeriodInDays -NE '2147483647'
+    $DomainsWithoutPassExpire = $GraphRequest | Where-Object -Property passwordValidityPeriodInDays -NE '2147483647'
 
-    If ($Settings.remediate -eq $true) {
+    if ($Settings.remediate -eq $true) {
 
-        if ($DomainswithoutPassExpire) {
-            $DomainswithoutPassExpire | ForEach-Object {
+        if ($DomainsWithoutPassExpire) {
+            $DomainsWithoutPassExpire | ForEach-Object {
                 try {
                     if ( $null -eq $_.passwordNotificationWindowInDays ) {
                         $Body = '{"passwordValidityPeriodInDays": 2147483647, "passwordNotificationWindowInDays": 14 }'
@@ -62,14 +61,21 @@ function Invoke-CIPPStandardPasswordExpireDisabled {
     }
 
     if ($Settings.alert -eq $true) {
-        if ($DomainswithoutPassExpire) {
-            Write-LogMessage -API 'Standards' -tenant $tenant -message "Password Expiration is not disabled for the following $($DomainswithoutPassExpire.Count) domains: $($DomainswithoutPassExpire.id -join ', ')" -sev Alert
+        if ($DomainsWithoutPassExpire) {
+            Write-StandardsAlert -message "Password Expiration is not disabled for the following $($DomainsWithoutPassExpire.Count) domains: $($DomainsWithoutPassExpire.id -join ', ')" -object $DomainsWithoutPassExpire -tenant $tenant -standardName 'PasswordExpireDisabled' -standardId $Settings.standardId
+            Write-LogMessage -API 'Standards' -tenant $tenant -message "Password Expiration is not disabled for the following $($DomainsWithoutPassExpire.Count) domains: $($DomainsWithoutPassExpire.id -join ', ')" -sev Info
         } else {
             Write-LogMessage -API 'Standards' -tenant $tenant -message "Password Expiration is disabled for all $($GraphRequest.Count) domains." -sev Info
         }
     }
 
     if ($Settings.report -eq $true) {
-        Add-CIPPBPAField -FieldName 'PasswordExpireDisabled' -FieldValue $DomainswithoutPassExpire -StoreAs json -Tenant $tenant
+        Add-CIPPBPAField -FieldName 'PasswordExpireDisabled' -FieldValue $DomainsWithoutPassExpire -StoreAs json -Tenant $tenant
+        if ($DomainsWithoutPassExpire) {
+            $FieldValue = $DomainsWithoutPassExpire
+        } else {
+            $FieldValue = $true
+        }
+        Set-CIPPStandardsCompareField -FieldName 'standards.PasswordExpireDisabled' -FieldValue $FieldValue -Tenant $tenant
     }
 }

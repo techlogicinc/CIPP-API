@@ -22,7 +22,7 @@ function Invoke-CIPPStandardSPAzureB2B {
         POWERSHELLEQUIVALENT
             Set-SPOTenant -EnableAzureADB2BIntegration \$true
         RECOMMENDEDBY
-            "CIS 3.0"
+            "CIS"
         UPDATECOMMENTBLOCK
             Run the Tools\Update-StandardsComments.ps1 script to update this comment block
     .LINK
@@ -30,10 +30,9 @@ function Invoke-CIPPStandardSPAzureB2B {
     #>
 
     param($Tenant, $Settings)
-    ##$Rerun -Type Standard -Tenant $Tenant -Settings $Settings 'SPAzureB2B'
 
     $CurrentState = Get-CIPPSPOTenant -TenantFilter $Tenant |
-    Select-Object -Property EnableAzureADB2BIntegration
+        Select-Object -Property EnableAzureADB2BIntegration
 
     $StateIsCorrect = ($CurrentState.EnableAzureADB2BIntegration -eq $true)
 
@@ -65,5 +64,11 @@ function Invoke-CIPPStandardSPAzureB2B {
 
     if ($Settings.report -eq $true) {
         Add-CIPPBPAField -FieldName 'AzureB2B' -FieldValue $StateIsCorrect -StoreAs bool -Tenant $tenant
+        if ($StateIsCorrect) {
+            $FieldValue = $true
+        } else {
+            $FieldValue = $CurrentState
+        }
+        Set-CIPPStandardsCompareField -FieldName 'standards.SPAzureB2B' -FieldValue $FieldValue -Tenant $Tenant
     }
 }
