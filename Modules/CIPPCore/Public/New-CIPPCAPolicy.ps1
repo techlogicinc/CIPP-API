@@ -7,6 +7,7 @@ function New-CIPPCAPolicy {
         $State,
         $Overwrite,
         $ReplacePattern = 'none',
+        $DisableSD = $false,
         $APIName = 'Create CA Policy',
         $Headers
     )
@@ -117,9 +118,9 @@ function New-CIPPCAPolicy {
         }
     }
 
-
     #for each of the locations, check if they exist, if not create them. These are in $jsonobj.LocationInfo
     $LocationLookupTable = foreach ($locations in $jsonobj.LocationInfo) {
+        if (!$locations) { continue }
         foreach ($location in $locations) {
             if (!$location.displayName) { continue }
             $CheckExististing = New-GraphGETRequest -uri 'https://graph.microsoft.com/beta/identity/conditionalAccess/namedLocations' -tenantid $TenantFilter -asApp $true
@@ -225,7 +226,13 @@ function New-CIPPCAPolicy {
             }
         }
     }
-
+    if ($DisableSD -eq $true) {
+        #Send request to disable security defaults.
+        $body = '{ "isEnabled": false }'
+        $null = New-GraphPostRequest -tenantid $tenant -Uri 'https://graph.microsoft.com/beta/policies/identitySecurityDefaultsEnforcementPolicy' -Type patch -Body $body -ContentType 'application/json'
+        Write-LogMessage -Headers $User -API $APINAME -tenant $($Tenant) -message "Disabled Security Defaults for tenant $($TenantFilter)" -Sev 'Info'
+        Start-Sleep 3
+    }
     $RawJSON = ConvertTo-Json -InputObject $JSONObj -Depth 10 -Compress
     Write-Information $RawJSON
     try {
@@ -233,7 +240,7 @@ function New-CIPPCAPolicy {
         $CheckExististing = New-GraphGETRequest -uri 'https://graph.microsoft.com/beta/identity/conditionalAccess/policies' -tenantid $TenantFilter -asApp $true | Where-Object -Property displayName -EQ $displayname
         if ($CheckExististing) {
             if ($Overwrite -ne $true) {
-                Throw "Conditional Access Policy with Display Name $($Displayname) Already exists"
+                throw "Conditional Access Policy with Display Name $($Displayname) Already exists"
                 return $false
             } else {
                 Write-Information "overwriting $($CheckExististing.id)"
