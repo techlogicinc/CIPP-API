@@ -22,7 +22,7 @@ function Invoke-ListLogs {
     } elseif ($Request.Query.logentryid) {
         # Return single log entry by RowKey
         $DateFilter = $Request.Query.DateFilter ?? (Get-Date -UFormat '%Y%m%d')
-        $Filter = "RowKey eq '{0}'" -f $Request.Query.logentryid, $DateFilter
+        $Filter = "RowKey eq '{0}' and PartitionKey eq '{1}'" -f $Request.Query.logentryid, $DateFilter
         $AllowedTenants = Test-CIPPAccess -Request $Request -TenantList
         Write-Host "Getting single log entry for RowKey: $($Request.Query.logentryid)"
 
@@ -82,7 +82,7 @@ function Invoke-ListLogs {
         }
     } else {
         if ($request.Query.Filter -eq 'True') {
-            $LogLevel = if ($Request.Query.Severity) { ($Request.query.Severity).split(',') } else { 'Info', 'Warn', 'Error', 'Critical', 'Alert' }
+            $LogLevel = if ($Request.Query.Severity) { ($Request.query.Severity).split(',') } else { 'Info', 'Warn', 'Warning', 'Error', 'Critical', 'Alert' }
             $PartitionKey = $Request.Query.DateFilter
             $username = $Request.Query.User ?? '*'
             $TenantFilter = $Request.Query.Tenant
@@ -102,7 +102,7 @@ function Invoke-ListLogs {
                 $Filter = "PartitionKey eq '{0}'" -f (Get-Date -UFormat '%Y%m%d')
             }
         } else {
-            $LogLevel = 'Info', 'Warn', 'Error', 'Critical', 'Alert'
+            $LogLevel = 'Info', 'Warn', 'Warning', 'Error', 'Critical', 'Alert'
             $PartitionKey = Get-Date -UFormat '%Y%m%d'
             $username = '*'
             $TenantFilter = $null

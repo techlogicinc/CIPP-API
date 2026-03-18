@@ -14,7 +14,7 @@ function Get-CIPPTimerFunctions {
 
     $FunctionName = $env:WEBSITE_SITE_NAME
     $MainFunctionVersion = ($Nodes | Where-Object { $_.RowKey -eq $FunctionName }).Version
-    $AvailableNodes = $Nodes.RowKey | Where-Object { $_.RowKey -match '-' -and $_.Version -eq $MainFunctionVersion } | ForEach-Object { ($_ -split '-')[1] }
+    $AvailableNodes = $Nodes | Where-Object { $_.RowKey -match '-' -and $_.Version -eq $MainFunctionVersion } | ForEach-Object { ($_.RowKey -split '-')[1] }
 
     # Get node name
     if ($FunctionName -match '-') {
@@ -42,10 +42,17 @@ function Get-CIPPTimerFunctions {
     $CIPPRoot = (Get-Item $CIPPCoreModuleRoot).Parent.Parent
     $CippTimers = Get-Content -Path $CIPPRoot\CIPPTimers.json
 
+    # Get all feature flags to filter disabled features
+    $FeatureFlags = Get-CIPPFeatureFlag
+    $DisabledTimers = $FeatureFlags | Where-Object { $_.Enabled -eq $false } | ForEach-Object { $_.Timers } | Where-Object { $_ }
+
     if ($ListAllTasks) {
         $Orchestrators = $CippTimers | ConvertFrom-Json | Sort-Object -Property Priority
     } else {
-        $Orchestrators = $CippTimers | ConvertFrom-Json | Where-Object { $_.RunOnProcessor -eq $RunOnProcessor } | Sort-Object -Property Priority
+        # Filter out timers associated with disabled feature flags
+        $Orchestrators = $CippTimers | ConvertFrom-Json | Where-Object {
+            $_.RunOnProcessor -eq $RunOnProcessor -and $_.Id -notin $DisabledTimers
+        } | Sort-Object -Property Priority
     }
     $Table = Get-CIPPTable -TableName 'CIPPTimers'
     $RunOnProcessorTxt = if ($RunOnProcessor) { 'true' } else { 'false' }
@@ -124,7 +131,7 @@ function Get-CIPPTimerFunctions {
                     }
                     $Status.NextOccurrence = $NextOccurrence.ToUniversalTime()
                     $PreferredProcessor = $Orchestrator.PreferredProcessor ?? ''
-                    if ($Status.PSObject.Properites.Name -notcontains 'PreferredProcessor') {
+                    if ($Status.PSObject.Properties.Name -notcontains 'PreferredProcessor') {
                         $Status | Add-Member -MemberType NoteProperty -Name 'PreferredProcessor' -Value $PreferredProcessor -Force
                     } else {
                         $Status.PreferredProcessor = $PreferredProcessor
