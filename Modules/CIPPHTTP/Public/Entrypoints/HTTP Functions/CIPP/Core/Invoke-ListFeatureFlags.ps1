@@ -21,6 +21,21 @@ function Invoke-ListFeatureFlags {
                 if ($Flag.Id -eq 'SuperAdminNG') {
                     $Flag.Enabled = $true
                 }
+                elseIf ($Flag.Id -eq 'AppInsights') {
+                    $Flag.Enabled = $false
+                }
+                elseIf ($Flag.Id -eq 'FunctionOffloading') {
+                    $Flag.Enabled = $false
+                }
+            }
+        }
+
+        # Hosted instances hide the backend settings page (Azure resource URLs)
+        if ($env:CIPP_HOSTED -eq 'true') {
+            foreach ($Flag in $FeatureFlags) {
+                if ($Flag.Id -eq 'BackendSettings') {
+                    $Flag.Enabled = $false
+                }
             }
         }
 
