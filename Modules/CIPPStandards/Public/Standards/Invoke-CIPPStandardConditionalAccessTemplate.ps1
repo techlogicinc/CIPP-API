@@ -40,7 +40,7 @@ function Invoke-CIPPStandardConditionalAccessTemplate {
 
     #Checking if the DB has been updated in the last 3h, if not, run an update before we run the standard, as CA policies are critical and we want to make sure we have the latest state before making changes or comparisons.
     $LastDBUpdate = Get-CIPPDbItem -TenantFilter $Tenant -Type 'ConditionalAccessPolicies' -CountsOnly
-    if ($LastDBUpdate -eq $null -or ($LastDBUpdate.Timestamp -lt (Get-Date).AddHours(-3) -or $LastDBUpdate.DataCount -eq 0)) {
+    if ($null -eq $LastDBUpdate -or ($LastDBUpdate.Timestamp -lt (Get-Date).AddHours(-3) -or $LastDBUpdate.DataCount -eq 0)) {
         Write-Information "DB last updated at $($LastDBUpdate.Timestamp). Updating DB before running standard, this is probably a manual run."
         Set-CIPPDBCacheConditionalAccessPolicies -TenantFilter $Tenant
     } else {
@@ -50,7 +50,7 @@ function Invoke-CIPPStandardConditionalAccessTemplate {
 
     $TestResult = Test-CIPPStandardLicense -StandardName 'ConditionalAccessTemplate_general' -TenantFilter $Tenant -Preset Entra
     if ($TestResult -eq $false) {
-        Set-CIPPStandardsCompareField -FieldName "standards.ConditionalAccessTemplate.$($Settings.TemplateList.value)" -FieldValue 'This tenant does not have the required license for this standard.' -Tenant $Tenant
+        Set-CIPPStandardsCompareField -FieldName "standards.ConditionalAccessTemplate.$($Settings.TemplateList.value)" -FieldValue 'This tenant does not have the required license for this standard.' -LicenseAvailable $false -Tenant $Tenant
         return $true
     } #we're done.
 
@@ -77,7 +77,7 @@ function Invoke-CIPPStandardConditionalAccessTemplate {
                 $TestP2 = Test-CIPPStandardLicense -StandardName 'ConditionalAccessTemplate_p2' -TenantFilter $Tenant -Preset EntraP2 -SkipLog
                 if (!$TestP2) {
                     Write-Information "Skipping policy $($Policy.displayName) as it requires AAD Premium P2 license."
-                    Set-CIPPStandardsCompareField -FieldName "standards.ConditionalAccessTemplate.$($Settings.TemplateList.value)" -CurrentValue @{ Differences = 'Policy requires an AAD Premium P2 license, which this tenant does not have.' } -ExpectedValue @{ Differences = @() } -Tenant $Tenant
+                    Set-CIPPStandardsCompareField -FieldName "standards.ConditionalAccessTemplate.$($Settings.TemplateList.value)" -CurrentValue @{ Differences = 'Policy requires an AAD Premium P2 license, which this tenant does not have.' } -ExpectedValue @{ Differences = @() } -LicenseAvailable $false -Tenant $Tenant
                     return $true
                 }
             }
@@ -101,7 +101,8 @@ function Invoke-CIPPStandardConditionalAccessTemplate {
             # Capture the Graph deploy error (e.g. invalid CA policy 1011/1085) so the report
             # section below surfaces the reason in the compare fields instead of just "missing".
             $DeployError = Get-NormalizedError -Message $_.Exception.Message
-            Write-LogMessage -API 'Standards' -tenant $tenant -message "Failed to create or update conditional access rule $($JSONObj.displayName). Error: $DeployError" -sev 'Error'
+            $PolicyName = $Policy.displayName ?? $Settings.TemplateList.label
+            Write-LogMessage -API 'Standards' -tenant $tenant -message "Failed to create or update conditional access rule $PolicyName. Error: $DeployError" -sev 'Error'
         }
     }
     if ($Settings.report -eq $true -or $Settings.remediate -eq $true) {
@@ -113,13 +114,6 @@ function Invoke-CIPPStandardConditionalAccessTemplate {
             Write-LogMessage -API 'Standards' -tenant $Tenant -message "Conditional Access template '$($Settings.TemplateList.label)' ($($Settings.TemplateList.value)) could not be loaded from the template store - skipping." -Sev 'Error'
             Set-CIPPStandardsCompareField -FieldName $FieldName -CurrentValue @{ Differences = "Template '$($Settings.TemplateList.label)' could not be loaded from the template store." } -ExpectedValue @{ Differences = @() } -Tenant $Tenant
             return
-        }
-
-        # Override the template's state with the Drift Standard's state if specified
-        # This ensures drift detection compares against the desired state, not the original template state
-        if ($Settings.state -and $Settings.state -ne 'donotchange') {
-            Write-Information "Overriding template state from '$($Policy.state)' to '$($Settings.state)' for drift comparison"
-            $Policy | Add-Member -NotePropertyName 'state' -NotePropertyValue $Settings.state -Force
         }
 
         if ($Policy.sessionControls) {
@@ -161,7 +155,7 @@ function Invoke-CIPPStandardConditionalAccessTemplate {
             } elseif ($Policy.conditions.userRiskLevels.Count -gt 0 -or $Policy.conditions.signInRiskLevels.Count -gt 0) {
                 $TestP2 = Test-CIPPStandardLicense -StandardName 'ConditionalAccessTemplate_p2' -TenantFilter $Tenant -Preset EntraP2 -SkipLog
                 if (!$TestP2) {
-                    Set-CIPPStandardsCompareField -FieldName $FieldName -CurrentValue @{ Differences = 'Policy requires an AAD Premium P2 license, which this tenant does not have.' } -ExpectedValue @{ Differences = @() } -Tenant $Tenant
+                    Set-CIPPStandardsCompareField -FieldName $FieldName -CurrentValue @{ Differences = 'Policy requires an AAD Premium P2 license, which this tenant does not have.' } -ExpectedValue @{ Differences = @() } -LicenseAvailable $false -Tenant $Tenant
                 } else {
                     Set-CIPPStandardsCompareField -FieldName $FieldName -CurrentValue @{ Differences = 'Policy is missing from this tenant.' } -ExpectedValue @{ Differences = @() } -Tenant $Tenant
                 }
@@ -176,6 +170,12 @@ function Invoke-CIPPStandardConditionalAccessTemplate {
                 Set-CIPPStandardsCompareField -FieldName $FieldName -CurrentValue @{ Differences = 'Tenant policy conversion returned null.' } -ExpectedValue @{ Differences = @() } -Tenant $Tenant
                 return
             }
+
+            if ($Settings.state -and $Settings.state -ne 'donotchange' -and $CompareObj.state -eq $Settings.state) {
+                Write-Information "Policy is in the deployed state '$($CompareObj.state)'; not comparing against template state '$($Policy.state)'"
+                $Policy | Add-Member -NotePropertyName 'state' -NotePropertyValue $CompareObj.state -Force
+            }
+
             try {
                 $Compare = Compare-CIPPIntuneObject -ReferenceObject $Policy -DifferenceObject $CompareObj -CompareType 'ca'
             } catch {

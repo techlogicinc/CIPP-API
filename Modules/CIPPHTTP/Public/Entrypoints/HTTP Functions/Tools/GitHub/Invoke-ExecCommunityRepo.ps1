@@ -41,26 +41,57 @@ function Invoke-ExecCommunityRepo {
 
     switch ($Action) {
         'Add' {
-            $Repo = Invoke-GitHubApiRequest -Path "repositories/$($Id)"
-            $RepoEntity = @{
-                PartitionKey  = 'CommunityRepos'
-                RowKey        = [string]$Repo.id
-                Name          = [string]$Repo.name
-                Description   = [string]$Repo.description
-                URL           = [string]$Repo.html_url
-                FullName      = [string]$Repo.full_name
-                Owner         = [string]$Repo.owner.login
-                Visibility    = [string]$Repo.visibility
-                WriteAccess   = [bool]$Repo.permissions.push
-                DefaultBranch = [string]$Repo.default_branch
-                Permissions   = [string]($Repo.permissions | ConvertTo-Json -Compress)
+            try {
+                if ($Id) {
+                    $Repo = Invoke-GitHubApiRequest -Path "repositories/$($Id)"
+                } else {
+                    $Repo = Invoke-GitHubApiRequest -Path "repos/$($Request.Body.FullName)"
+                }
+                $RepoEntity = @{
+                    PartitionKey  = 'CommunityRepos'
+                    RowKey        = [string]$Repo.id
+                    Name          = [string]$Repo.name
+                    Description   = [string]$Repo.description
+                    URL           = [string]$Repo.html_url
+                    FullName      = [string]$Repo.full_name
+                    Owner         = [string]$Repo.owner.login
+                    Visibility    = [string]$Repo.visibility
+                    WriteAccess   = [bool]$Repo.permissions.push
+                    DefaultBranch = [string]$Repo.default_branch
+                    Permissions   = [string]($Repo.permissions | ConvertTo-Json -Compress)
+                }
+                if ($Request.Body.TemplateTypes) {
+                    $RepoEntity.TemplateTypes = [string](ConvertTo-Json -InputObject @($Request.Body.TemplateTypes) -Compress)
+                }
+
+                Add-CIPPAzDataTableEntity @Table -Entity $RepoEntity -Force | Out-Null
+
+                $Results = @{
+                    resultText = "Community repository '$($Repo.name)' added"
+                    state      = 'success'
+                }
+            } catch {
+                $Results = @{
+                    resultText = "Unable to add repository: $($_.Exception.Message)"
+                    state      = 'error'
+                }
             }
+        }
+        'SetTemplateTypes' {
+            if (!$RepoEntity) {
+                $Results = @{
+                    resultText = "Repository $($Id) not found"
+                    state      = 'error'
+                }
+            } else {
+                $TemplateTypesJson = [string](ConvertTo-Json -InputObject @($Request.Body.TemplateTypes) -Compress)
+                $RepoEntity | Add-Member -NotePropertyName 'TemplateTypes' -NotePropertyValue $TemplateTypesJson -Force
+                $null = Add-CIPPAzDataTableEntity @Table -Entity $RepoEntity -Force
 
-            Add-CIPPAzDataTableEntity @Table -Entity $RepoEntity -Force | Out-Null
-
-            $Results = @{
-                resultText = "Community repository '$($Repo.name)' added"
-                state      = 'success'
+                $Results = @{
+                    resultText = "Template types updated for $($RepoEntity.Name)"
+                    state      = 'success'
+                }
             }
         }
         'Update' {
@@ -97,7 +128,7 @@ function Invoke-ExecCommunityRepo {
         'Delete' {
             if ($RepoEntity) {
                 $Delete = $RepoEntity | Select-Object PartitionKey, RowKey, ETag
-                Remove-AzDataTableEntity @Table -Entity $Delete
+                Remove-CIPPAzDataTableEntity @Table -Entity $Delete
             }
             $Results = @{
                 resultText = "Repository $($RepoEntity.Name) deleted"
@@ -107,10 +138,10 @@ function Invoke-ExecCommunityRepo {
         'UploadTemplate' {
             $GUID = $Request.Body.GUID
             $TemplateTable = Get-CIPPTable -TableName templates
-            $TemplateEntity = Get-CIPPAzDataTableEntity @TemplateTable -Filter "RowKey eq '$($GUID)'" | Select-Object -ExcludeProperty ETag, Timestamp
+            $TemplateEntity = Get-CIPPAzDataTableEntity @TemplateTable -Filter "RowKey eq '$($GUID)' or OriginalEntityId eq '$($GUID)'" | Select-Object -ExcludeProperty ETag, Timestamp
             $Branch = $RepoEntity.UploadBranch ?? $RepoEntity.DefaultBranch
             if ($TemplateEntity) {
-                $Template = $TemplateEntity.JSON | ConvertFrom-Json
+                $Template = $TemplateEntity.JSON | ConvertFrom-Json -Depth 100 -ErrorAction Stop
                 $DisplayName = $Template.Displayname ?? $Template.templateName ?? $Template.name
                 if ($Template.tenantFilter) {
                     $Template.tenantFilter = @(@{ label = 'Template Tenant'; value = 'Template Tenant' })
