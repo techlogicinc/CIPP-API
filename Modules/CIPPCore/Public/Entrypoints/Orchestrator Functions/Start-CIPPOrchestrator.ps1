@@ -100,15 +100,86 @@ function Start-CIPPOrchestrator {
             throw
         }
 
-        Write-Information "Craft: Queuing orchestrator '$OrchestratorName' ($TaskCount tasks$(if ($PostExecFunctionName) { ", PostExec: $PostExecFunctionName" }))"
-        [Craft.Services.OrchestratorBridge]::QueueOrchestrationFromFile(
-            $OrchestratorName,
-            $BatchPath,
-            4,
-            $PostExecFunctionName,
-            $PostExecParametersJson,
-            $InputObject.Reference
-        )
+        # $CraftOperationContext is stamped into the global scope per invocation by the Craft
+        # worker — the pipeline thread never sees OperationContext.Current directly, and on an
+        # older Craft runtime the variable simply does not exist, so this read degrades to $null.
+        # Both the priority default and the parent-run lineage below come from it.
+        $OpContext = Get-Variable -Name 'CraftOperationContext' -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+
+        # The queue claims strictly by priority bucket (P00 first), so this decides who runs
+        # when the limiter is saturated. Resolution order:
+        #   1. Explicit Priority on the InputObject, when it is a valid bucket (out-of-range values
+        #      take the fallback: the store clamps into 0-99 buckets, so a stray negative would
+        #      otherwise silently land in the critical P00 bucket).
+        #   2. The enclosing run's priority (from the stamped context) — a child run belongs to
+        #      its parent's band, so a baseline run's follow-up no longer drops back to the default.
+        #   3. P2 for HTTP-triggered orchestrations — user-initiated work must not queue behind
+        #      background fan-outs.
+        #   4. The historical default 4 (timers and other background starters).
+        $Priority = if ($null -ne $InputObject.Priority) { [int]$InputObject.Priority }
+        if ($null -eq $Priority -or $Priority -lt 0 -or $Priority -gt 99) {
+            $Priority = if ($null -ne $OpContext) { $OpContext.PSObject.Properties['Priority'].Value }
+            if ($null -eq $Priority) {
+                $Priority = if ($null -ne $OpContext -and $OpContext.Category -eq 'HTTP') { 2 } else { 4 }
+            }
+            $Priority = [int]$Priority
+        }
+
+        # Lineage: pass the enclosing run explicitly as the new run's parent, so Craft holds the
+        # parent's finalize (and PostExecution) until this child completes. The bridge cannot see
+        # the parent on its own — its ambient context read is null on the pipeline thread, which
+        # is exactly where this call runs.
+        $ParentRunName = if ($null -ne $OpContext) { $OpContext.PSObject.Properties['RunName'].Value }
+
+        # Sequential mode: opt-in per run (e.g. offboarding, where a later step must not race the ones
+        # before it). Craft runs the batch one task at a time in payload order instead of fanning out.
+        # Absent/false marshals to $false, so existing callers are unaffected.
+        $Sequential = [bool]($InputObject.Sequential)
+
+        Write-Information "Craft: Queuing orchestrator '$OrchestratorName' ($TaskCount tasks, P$Priority$(if ($Sequential) { ', Sequential' })$(if ($PostExecFunctionName) { ", PostExec: $PostExecFunctionName" })$(if ($ParentRunName) { ", Parent: $ParentRunName" }))"
+        # Probe the method arity so this wrapper stays deployable against older Craft runtimes: the
+        # 8-parameter form adds Sequential, the 7-parameter form adds ParentRunName, and the oldest
+        # exposes 6. Passing more arguments than the deployed method accepts would throw a
+        # method-resolution error and fail the orchestration outright, so match what is present.
+        $QueueMethod = [Craft.Services.OrchestratorBridge].GetMethod('QueueOrchestrationFromFile')
+        $ParamCount = $QueueMethod.GetParameters().Count
+        if ($ParamCount -ge 8) {
+            [Craft.Services.OrchestratorBridge]::QueueOrchestrationFromFile(
+                $OrchestratorName,
+                $BatchPath,
+                $Priority,
+                $PostExecFunctionName,
+                $PostExecParametersJson,
+                $InputObject.Reference,
+                $ParentRunName,
+                $Sequential
+            )
+        } elseif ($ParamCount -ge 7) {
+            if ($Sequential) {
+                Write-Warning "Craft: Sequential requested for '$OrchestratorName' but the deployed Craft runtime does not support it (running fan-out)"
+            }
+            [Craft.Services.OrchestratorBridge]::QueueOrchestrationFromFile(
+                $OrchestratorName,
+                $BatchPath,
+                $Priority,
+                $PostExecFunctionName,
+                $PostExecParametersJson,
+                $InputObject.Reference,
+                $ParentRunName
+            )
+        } else {
+            if ($Sequential) {
+                Write-Warning "Craft: Sequential requested for '$OrchestratorName' but the deployed Craft runtime does not support it (running fan-out)"
+            }
+            [Craft.Services.OrchestratorBridge]::QueueOrchestrationFromFile(
+                $OrchestratorName,
+                $BatchPath,
+                $Priority,
+                $PostExecFunctionName,
+                $PostExecParametersJson,
+                $InputObject.Reference
+            )
+        }
         return "Craft-$OrchestratorName"
     }
 

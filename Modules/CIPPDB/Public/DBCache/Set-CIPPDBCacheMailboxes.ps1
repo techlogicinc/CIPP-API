@@ -27,7 +27,7 @@ function Set-CIPPDBCacheMailboxes {
 
         # Get mailboxes and user details in a single bulk request
         $ZeroArchiveGuid = '00000000-0000-0000-0000-000000000000'
-        $Select = 'id,ExchangeGuid,ArchiveGuid,UserPrincipalName,DisplayName,PrimarySMTPAddress,RecipientType,RecipientTypeDetails,EmailAddresses,WhenSoftDeleted,IsInactiveMailbox,ForwardingSmtpAddress,DeliverToMailboxAndForward,ForwardingAddress,HiddenFromAddressListsEnabled,ExternalDirectoryObjectId,MessageCopyForSendOnBehalfEnabled,MessageCopyForSentAsEnabled,GrantSendOnBehalfTo,PersistedCapabilities,LitigationHoldEnabled,LitigationHoldDate,LitigationHoldDuration,ComplianceTagHoldApplied,RetentionHoldEnabled,InPlaceHolds,RetentionPolicy,RemotePowerShellEnabled,Guid,Identity,AutoExpandingArchiveEnabled'
+        $Select = 'id,ExchangeGuid,ArchiveGuid,UserPrincipalName,DisplayName,PrimarySMTPAddress,RecipientType,RecipientTypeDetails,EmailAddresses,WhenSoftDeleted,IsInactiveMailbox,ForwardingSmtpAddress,DeliverToMailboxAndForward,ForwardingAddress,HiddenFromAddressListsEnabled,ExternalDirectoryObjectId,MessageCopyForSendOnBehalfEnabled,MessageCopyForSentAsEnabled,GrantSendOnBehalfTo,PersistedCapabilities,LitigationHoldEnabled,LitigationHoldDate,LitigationHoldDuration,ComplianceTagHoldApplied,RetentionHoldEnabled,InPlaceHolds,RetentionPolicy,RemotePowerShellEnabled,Guid,Identity,AutoExpandingArchiveEnabled,ArchiveQuota,IsExchangeCloudManaged,IsDirSynced,MailboxPlan,MailboxPlanId,RecipientLimits,AccountDisabled,AuditEnabled,AuditOwner,AuditDelegate,AuditAdmin,DefaultAuditSet'
         $BulkRequests = @(
             @{ CmdletInput = @{ CmdletName = 'Get-Mailbox'; Parameters = @{} } }
             @{ CmdletInput = @{ CmdletName = 'Get-User'; Parameters = @{} } }
@@ -54,13 +54,19 @@ function Set-CIPPDBCacheMailboxes {
         # Transform Get-Mailbox results and merge Get-User properties
         $Mailboxes = [System.Collections.Generic.List[PSObject]]::new()
         foreach ($Mailbox in @($BulkResults.'Get-Mailbox')) {
-            $MatchedUser = $UserLookup[$Mailbox.ExternalDirectoryObjectId]
+            # ExternalDirectoryObjectId can be null for a mailbox that has no linked Entra ID
+            # directory object (the $UserLookup population above already guards against this on
+            # the write side - see the -and check a few lines up). Indexing a hashtable with a
+            # null key throws "Index operation failed; the array index evaluated to null." and
+            # aborts the whole cache run for the tenant, so the read side needs the same guard.
+            $MatchedUser = if ($Mailbox.ExternalDirectoryObjectId) { $UserLookup[$Mailbox.ExternalDirectoryObjectId] } else { $null }
             $AutoExpandingArchiveState = Get-CIPPAutoExpandingArchiveState -MailboxAutoExpandingArchiveEnabled $Mailbox.AutoExpandingArchiveEnabled -OrgAutoExpandingArchiveEnabled $OrgAutoExpandingArchiveEnabled
             $Mailboxes.Add(($Mailbox | Select-Object id, ExchangeGuid, ArchiveGuid, WhenSoftDeleted,
                     @{ Name = 'UPN'; Expression = { $_.'UserPrincipalName' } },
                     @{ Name = 'displayName'; Expression = { $_.'DisplayName' } },
                     @{ Name = 'primarySmtpAddress'; Expression = { $_.'PrimarySMTPAddress' } },
                     @{ Name = 'ArchiveEnabled'; Expression = { $_.ArchiveGuid -and $_.ArchiveGuid.ToString() -ne $ZeroArchiveGuid } },
+                    @{ Name = 'ArchiveQuota'; Expression = { try { Get-ExoOnlineStringBytes -SizeString ([string]$_.ArchiveQuota) } catch { 0 } } },
                     @{ Name = 'AutoExpandingArchive'; Expression = { $AutoExpandingArchiveState.AutoExpandingArchive } },
                     @{ Name = 'AutoExpandingArchiveScope'; Expression = { $AutoExpandingArchiveState.AutoExpandingArchiveScope } },
                     @{ Name = 'ArchiveSize'; Expression = { 0 } },
@@ -87,6 +93,18 @@ function Set-CIPPDBCacheMailboxes {
                     InPlaceHolds,
                     RetentionPolicy,
                     GrantSendOnBehalfTo,
+                    IsExchangeCloudManaged,
+                    IsDirSynced,
+                    MailboxPlan,
+                    MailboxPlanId,
+                    PersistedCapabilities,
+                    RecipientLimits,
+                    AccountDisabled,
+                    AuditEnabled,
+                    AuditOwner,
+                    AuditDelegate,
+                    AuditAdmin,
+                    DefaultAuditSet,
                     @{ Name = 'RemotePowerShellEnabled'; Expression = { $MatchedUser.RemotePowerShellEnabled } },
                     @{ Name = 'Guid'; Expression = { $MatchedUser.Guid } },
                     @{ Name = 'Identity'; Expression = { $MatchedUser.Identity } }))

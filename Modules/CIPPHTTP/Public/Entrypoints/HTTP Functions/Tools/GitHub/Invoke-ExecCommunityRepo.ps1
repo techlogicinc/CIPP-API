@@ -12,6 +12,9 @@ function Invoke-ExecCommunityRepo {
     [CmdletBinding()]
     param($Request, $TriggerMetadata)
 
+    $APIName = $Request.Params.CIPPEndpoint
+    $Headers = $Request.Headers
+
     $Action = $Request.Body.Action
     $Id = $Request.Body.Id
     if ($Request.Body.Id) {
@@ -153,7 +156,8 @@ function Invoke-ExecCommunityRepo {
 
                 $Basename = $DisplayName -replace '\s', '_' -replace '[^\w\d_]', ''
                 $Path = '{0}/{1}.json' -f $TemplateEntity.PartitionKey, $Basename
-                $Results = Push-GitHubContent -FullName $Request.Body.FullName -Path $Path -Content ($TemplateEntity | ConvertTo-Json -Compress) -Message $Request.Body.Message -Branch $Branch
+                # Pretty-printed, not compressed: repo files are hand-edited on GitHub.
+                $Results = Push-GitHubContent -FullName $Request.Body.FullName -Path $Path -Content ($TemplateEntity | ConvertTo-Json -Depth 100) -Message $Request.Body.Message -Branch $Branch
 
                 $Results = @{
                     resultText = "Template '$($DisplayName)' uploaded"
@@ -182,11 +186,11 @@ function Invoke-ExecCommunityRepo {
                     $DisplayName = "$($TemplateJson.Displayname ?? $TemplateJson.displayName ?? $TemplateJson.name ?? $TemplateEntity.RowKey)"
                     $Basename = $DisplayName -replace '\s', '_' -replace '[^\w\d_]', ''
                     $Path = '{0}/{1}.json' -f $TemplateEntity.PartitionKey, $Basename
-                    $null = Push-GitHubContent -FullName $Request.Body.FullName -Path $Path -Content ($TemplateEntity | ConvertTo-Json -Compress -Depth 100) -Message $Message -Branch $Branch
+                    $null = Push-GitHubContent -FullName $Request.Body.FullName -Path $Path -Content ($TemplateEntity | ConvertTo-Json -Depth 100) -Message $Message -Branch $Branch
                 }
                 $BaselineBasename = "$($Export.Baseline.templateName)" -replace '\s', '_' -replace '[^\w\d_]', ''
                 $BaselinePath = 'BaselineTemplate/{0}.json' -f $BaselineBasename
-                $null = Push-GitHubContent -FullName $Request.Body.FullName -Path $BaselinePath -Content ($Export.Baseline | ConvertTo-Json -Compress -Depth 100) -Message $Message -Branch $Branch
+                $null = Push-GitHubContent -FullName $Request.Body.FullName -Path $BaselinePath -Content ($Export.Baseline | ConvertTo-Json -Depth 100) -Message $Message -Branch $Branch
                 $Results = @{
                     resultText = "Baseline '$($Export.Baseline.templateName)' uploaded with $(@($Export.Templates).Count) related template$(if (@($Export.Templates).Count -eq 1) { '' } else { 's' })"
                     state      = 'success'
@@ -294,7 +298,7 @@ function Invoke-ExecCommunityRepo {
 
                 $Basename = $LatestScript.ScriptName -replace '\s', '_' -replace '[^\w\d_]', ''
                 $Path = 'CustomTests/{0}.json' -f $Basename
-                $null = Push-GitHubContent -FullName $Request.Body.FullName -Path $Path -Content ($ExportData | ConvertTo-Json -Compress -Depth 10) -Message $Request.Body.Message -Branch $Branch
+                $null = Push-GitHubContent -FullName $Request.Body.FullName -Path $Path -Content ($ExportData | ConvertTo-Json -Depth 10) -Message $Request.Body.Message -Branch $Branch
 
                 $Results = @{
                     resultText = "Custom test '$($LatestScript.ScriptName)' uploaded"
@@ -367,6 +371,14 @@ function Invoke-ExecCommunityRepo {
                 resultText = "Action $Action not supported"
                 state      = 'error'
             }
+        }
+    }
+
+    if ($Results) {
+        if ($Results.state -eq 'success') {
+            Write-LogMessage -headers $Headers -API $APIName -tenant 'Global' -message $Results.resultText -Sev 'Info'
+        } elseif ($Results.state -eq 'error') {
+            Write-LogMessage -headers $Headers -API $APIName -tenant 'Global' -message $Results.resultText -Sev 'Error'
         }
     }
 
