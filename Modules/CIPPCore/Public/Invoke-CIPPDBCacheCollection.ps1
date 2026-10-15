@@ -53,14 +53,17 @@ function Invoke-CIPPDBCacheCollection {
             'Devices'
             'Organization'
             'Roles'
+            'RoleDefinitions'
+            'RoleAssignments'
+            'AdministrativeUnits'
             'AdminConsentRequestPolicy'
             'AuthorizationPolicy'
             'AuthenticationMethodsPolicy'
             'SecurityDefaults'
-            'DeviceSettings'
             'DirectoryRecommendations'
             'CrossTenantAccessPolicy'
             'DefaultAppManagementPolicy'
+            'ActivityBasedTimeoutPolicy'
             'Settings'
             'SecureScore'
             'PIMSettings'
@@ -71,6 +74,7 @@ function Invoke-CIPPDBCacheCollection {
             'AppRoleAssignments'
             'LicenseOverview'
             'ActiveUserDetail'
+            'M365AppUserDetail'
             'BitlockerKeys'
             'AdminReportSettings'
             'PeopleInsights'
@@ -86,6 +90,9 @@ function Invoke-CIPPDBCacheCollection {
             'SelfServicePurchaseProducts'
             'MoeraDmarc'
             'DomainAnalyser'
+            'ServiceHealthOverviews'
+            'ServiceHealthIssues'
+            'MessageCenterMessages'
         )
         ExchangeConfig     = @(
             'ExoAntiPhishPolicies'
@@ -126,12 +133,12 @@ function Invoke-CIPPDBCacheCollection {
         ExchangeData       = @(
             'CASMailboxes'
             'MailboxUsage'
+            'MailTrafficSummary'
             'OfficeActivations'
             'HVEAccounts'
         )
         ConditionalAccess  = @(
             'ConditionalAccessPolicies'
-            'CredentialUserRegistrationDetails'
             'UserRegistrationDetails'
         )
         IdentityProtection = @(
@@ -153,8 +160,6 @@ function Invoke-CIPPDBCacheCollection {
             'IntuneAppProtectionPolicies'
             'IntuneScripts'
             'IntuneReusableSettings'
-            'DetectedApps'
-            'IntuneAppInstallStatus'
             'MDEOnboarding'
             'AutopilotDeploymentProfiles'
             'DeviceEnrollmentConfigurations'
@@ -162,6 +167,8 @@ function Invoke-CIPPDBCacheCollection {
             'IntuneDataProcessorOnboarding'
             'IntuneBrandingProfile'
             'ManagedDeviceCleanupRules'
+            'DetectedApps'
+            'IntuneAppInstallStatus'
         )
         Compliance         = @(
             'SensitivityLabels'
@@ -183,6 +190,7 @@ function Invoke-CIPPDBCacheCollection {
             'SPOTenantSyncClientRestriction'
             'SharePointAdminSettings'
             'SharePointSiteUsage'
+            'SharePointUsageReport'
             'SiteActivity'
             'OneDriveUsage'
         )
@@ -192,6 +200,7 @@ function Invoke-CIPPDBCacheCollection {
             'CsExternalAccessPolicy'
             'CsTenantFederationConfiguration'
             'CsTeamsMessagingPolicy'
+            'CsTeamsFilesPolicy'
             'CsTeamsMessagingConfiguration'
             'CsTeamsAppPermissionPolicy'
             'Teams'
@@ -222,6 +231,14 @@ function Invoke-CIPPDBCacheCollection {
     $FailedCount = 0
     $Errors = [System.Collections.Generic.List[string]]::new()
     $Timings = [System.Collections.Generic.List[string]]::new()
+
+    if ($CollectionType -eq 'Intune') {
+        # Start the report exports early; DetectedApps and IntuneAppInstallStatus read them last
+        foreach ($ReportName in 'AppInvRawData', 'AppInstallStatusAggregate') {
+            try { $null = Get-CIPPIntuneReportExportJob -TenantFilter $TenantFilter -ReportName $ReportName }
+            catch { Write-Warning "  [$CollectionType] Could not start the $ReportName export for $TenantFilter : $($_.Exception.Message)" }
+        }
+    }
 
     foreach ($CacheType in $CacheTypes) {
         $FullFunctionName = "Set-CIPPDBCache$CacheType"
